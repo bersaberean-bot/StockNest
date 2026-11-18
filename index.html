@@ -35,13 +35,14 @@
 <dialog id="profileDialog" aria-labelledby="profileTitle">
  <form id="profileForm">
   <h2 id="profileTitle">Owner profile</h2>
-  <p class="profile-help">Your profile is saved with this account in this browser.</p>
+  <p class="profile-help">Your profile is saved in this browser.</p>
   <div class="profile-preview" id="profilePreview" aria-label="Profile photo preview"></div>
   <label for="profilePhoto">Profile photo</label><input id="profilePhoto" type="file" accept="image/jpeg,image/png,image/webp">
   <button type="button" class="ghost remove-photo" id="removeProfilePhoto">Remove photo</button>
   <label for="ownerName">Name</label><input id="ownerName" maxlength="60" autocomplete="name" required>
-  <label for="ownerEmail">Email</label><input id="ownerEmail" type="email" maxlength="120" autocomplete="email">
   <label for="ownerRole">Role</label><input id="ownerRole" maxlength="60" value="Owner" autocomplete="organization-title">
+  <label for="ownerQuestion">Recovery question</label><select id="ownerQuestion"><option value="">No recovery question</option></select>
+  <label for="ownerAnswer">Recovery answer</label><input id="ownerAnswer" autocomplete="off" placeholder="Leave blank to keep the current answer">
   <div class="err" id="profileError" role="alert"></div>
   <div class="dialog-actions"><button type="button" class="ghost" id="cancelProfile">Cancel</button><button type="submit" class="primary">Save profile</button></div>
  </form>
