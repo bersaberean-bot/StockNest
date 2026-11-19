@@ -1,9 +1,29 @@
-/* ---------- Database layer (browser storage, separated by account) ---------- */
-const KEY='supply.ledger.v2';let db,inventoryMemory={};
+/* ---------- Supabase database layer ---------- */
+const supabaseConfig=window.STOCKNEST_SUPABASE||{};
+const supabaseClient=window.supabase&&supabaseConfig.url&&supabaseConfig.publishableKey
+ ?window.supabase.createClient(supabaseConfig.url,supabaseConfig.publishableKey)
+ :null;
+let db,activeUserId='';
 const now=()=>new Date().toLocaleString();
 function seed(){const P=[{sku:'LAP-LAT',name:'Dell Latitude laptop',qty:4,threshold:5,target:20},{sku:'MSE-WL',name:'Wireless mouse',qty:32,threshold:15,target:60},{sku:'KBD-MK',name:'Mechanical keyboard',qty:12,threshold:10,target:30},{sku:'HDMI-2M',name:'HDMI cable 2 m',qty:9,threshold:10,target:40},{sku:'SSD-1T',name:'1 TB SSD drive',qty:6,threshold:5,target:15},{sku:'RTR-AX',name:'Wi-Fi 6 router',qty:3,threshold:4,target:12}];return{products:P,moves:P.map(p=>({t:now(),sku:p.sku,type:'IN',qty:p.qty,after:p.qty,note:'Initial stock'}))}}
-function load(){try{const all=JSON.parse(localStorage.getItem(KEY));if(all&&all[activeUser])return all[activeUser];if(all&&Array.isArray(all.products)&&Array.isArray(all.moves))return all}catch(e){}return inventoryMemory[activeUser]||seed()}
-function save(){inventoryMemory[activeUser]=db;try{let all=JSON.parse(localStorage.getItem(KEY));if(!all||Array.isArray(all.products)||typeof all!=='object')all={};all[activeUser]=db;localStorage.setItem(KEY,JSON.stringify(all));return true}catch(e){return false}}
+async function loadInventory(userId){
+ const {data,error}=await supabaseClient.from('account_inventory').select('inventory').eq('user_id',userId).maybeSingle();
+ if(error)throw error;
+ if(data&&data.inventory&&Array.isArray(data.inventory.products)&&Array.isArray(data.inventory.moves))return data.inventory;
+ const inventory=seed();
+ const {error:saveError}=await supabaseClient.from('account_inventory').upsert({user_id:userId,inventory,updated_at:new Date().toISOString()},{onConflict:'user_id'});
+ if(saveError)throw saveError;
+ return inventory;
+}
+async function saveInitialInventory(userId){
+ const {error}=await supabaseClient.from('account_inventory').insert({user_id:userId,inventory:seed(),updated_at:new Date().toISOString()});
+ if(error)throw error;
+}
+async function save(){
+ if(!activeUserId)throw new Error('No signed-in Supabase account.');
+ const {error}=await supabaseClient.from('account_inventory').upsert({user_id:activeUserId,inventory:db,updated_at:new Date().toISOString()},{onConflict:'user_id'});
+ if(error)throw error;
+}
 
 /* ---------- Business rules (pure functions, work on any db copy) ---------- */
 const isInt=n=>Number.isInteger(n);
@@ -127,11 +147,29 @@ function vProof(v){
   $('#res').innerHTML=R.join('')}}
 
 /* ---------- Accounts and login ---------- */
-const UK='supply.users.v1';let activeUser='',activeProfile={},umem=null,recoveryUser='',recoveryQuestion='';
+let activeUser='',activeProfile={},recoveryUser='',recoveryQuestion='';
 const QS=['What was the name of your first pet?','What city were you born in?','What was your first school?','What was your childhood nickname?','What was the name of your favorite teacher?','What was your favorite subject in school?'];
-async function hash(value){try{const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value));return[...new Uint8Array(digest)].map(byte=>byte.toString(16).padStart(2,'0')).join('')}catch(e){return'p:'+value}}
-async function users(){try{const stored=JSON.parse(localStorage.getItem(UK));if(stored&&typeof stored==='object')return stored}catch(e){}return umem||{}}
-async function saveUsers(accounts){umem=accounts;try{localStorage.setItem(UK,JSON.stringify(accounts));return true}catch(e){return false}}
+async function hash(value){try{const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value));return[...new Uint8Array(digest)].map(byte=>byte.toString(16).padStart(2,'0')).join('')}catch(e){throw new Error('Secure answer hashing is unavailable. Open the site over HTTPS and try again.')}}
+function randomSalt(){return[...crypto.getRandomValues(new Uint8Array(16))].map(byte=>byte.toString(16).padStart(2,'0')).join('')}
+async function recoveryHash(answer,salt){return hash(salt+':'+answer.trim().toLowerCase())}
+function usernameEmail(username){return username+'@accounts.stocknest.invalid'}
+async function writeRecovery(userId,username,question,answer){
+ const salt=randomSalt(),answerHash=await recoveryHash(answer,salt);
+ const {error}=await supabaseClient.from('account_recovery').upsert({user_id:userId,username,question,recovery_salt:salt,recovery_answer_hash:answerHash},{onConflict:'user_id'});
+ if(error)throw error;
+}
+async function callRecovery(body){
+ const {data,error}=await supabaseClient.functions.invoke('password-recovery',{body});
+ if(error){
+  let message=error.message;
+  if(error.context&&typeof error.context.json==='function'){
+   try{const responseBody=await error.context.json();if(responseBody.error)message=responseBody.error}catch(e){}
+  }
+  throw new Error(message);
+ }
+ if(data&&data.error)throw new Error(data.error);
+ return data;
+}
 
 const EYE='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>';
 const EYEOFF='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.9 10.9 0 0 1 12 19C5 19 1 12 1 12a18.5 18.5 0 0 1 5.06-5.94M9.9 4.24A10.9 10.9 0 0 1 12 5c7 0 11 7 11 7a18.5 18.5 0 0 1-2.16 3.19M14.12 14.12a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/></svg>';
@@ -161,27 +199,108 @@ $('#card').addEventListener('click',async e=>{const b=e.target.closest('button')
  if(b.dataset.m)return card(b.dataset.m);
  if(b.dataset.auth){const registering=b.dataset.auth==='up',panels=$('#card').querySelectorAll('.auth-overlay-panel');$('#card').classList.toggle('register-active',registering);panels.forEach((panel,index)=>{const hidden=registering?index===0:index===1,button=panel.querySelector('button');panel.setAttribute('aria-hidden',hidden?'true':'false');button.disabled=hidden;button.tabIndex=hidden?-1:0});const input=$(registering?'#nu':'#u');if(input)input.focus();return}
  if(b.classList.contains('eye')){const input=$('#'+b.dataset.for),show=input.type==='password';input.type=show?'text':'password';b.innerHTML=show?EYEOFF:EYE;b.setAttribute('aria-label',show?'Hide password':'Show password');return}
- const accounts=await users();
- if(b.id==='f1'){const username=$('#fu').value.trim().toLowerCase(),account=accounts[username];if(!account)return fail('No account was found with that username.');if(!account.q||!account.a)return fail('No recovery question is set. Sign in and add one in your profile first.');recoveryUser=username;recoveryQuestion=account.q;card('reset');return}
- if(b.id==='f2'){const account=accounts[recoveryUser];if(!account)return fail('Account not found. Start the reset again.');if($('#fp').value.length<6)return fail('Password needs at least 6 characters.');if($('#fp').value!==$('#fc').value)return fail('The passwords do not match.');if(account.a!==await hash($('#fa').value.trim().toLowerCase()))return fail('That recovery answer does not match.');account.pw=await hash($('#fp').value);if(!await saveUsers(accounts))return fail('Browser storage is unavailable; the password could not be saved.');recoveryUser='';recoveryQuestion='';card('in','Password reset. Sign in with your new password.');return}
- if(b.id==='go'){const username=$('#u').value.trim().toLowerCase(),account=accounts[username];if(account&&account.pw===await hash($('#p').value)){enter(username,account.profile||{})}else fail('Wrong username or password.');return}
- if(b.id==='su'){const username=$('#nu').value.trim().toLowerCase(),password=$('#np').value;if(!/^[a-z0-9_]{3,20}$/.test(username))return fail('Username needs 3-20 letters, digits or underscores.');if(accounts[username])return fail('That username is taken.');if(password.length<6)return fail('Password needs at least 6 characters.');if(password!==$('#nc').value)return fail('The passwords do not match.');if(!$('#na').value.trim())return fail('Enter a recovery answer.');const account={pw:await hash(password),q:$('#nq').value,a:await hash($('#na').value.trim().toLowerCase()),profile:{name:'',role:'Owner',photo:''}};accounts[username]=account;if(!await saveUsers(accounts)){delete accounts[username];return fail('Browser storage is unavailable, so the account could not be saved.')}enter(username,account.profile)}
+ try{
+  if(b.id==='f1'){
+   const username=$('#fu').value.trim().toLowerCase();
+   if(!/^[a-z0-9_]{3,20}$/.test(username))return fail('Enter the username for this account.');
+   const result=await callRecovery({action:'question',username});
+   recoveryUser=username;recoveryQuestion=result.question;card('reset');return;
+  }
+  if(b.id==='f2'){
+   const password=$('#fp').value;
+   if(password.length<6)return fail('Password needs at least 6 characters.');
+   if(password!==$('#fc').value)return fail('The passwords do not match.');
+   await callRecovery({action:'reset',username:recoveryUser,answer:$('#fa').value,password});
+   recoveryUser='';recoveryQuestion='';card('in','Password reset. Sign in with your new password.');return;
+  }
+  if(b.id==='go'){
+   const username=$('#u').value.trim().toLowerCase(),password=$('#p').value;
+   if(!/^[a-z0-9_]{3,20}$/.test(username))return fail('Enter your username (3-20 letters, digits or underscores).');
+   const {data,error}=await supabaseClient.auth.signInWithPassword({email:usernameEmail(username),password});
+   if(error)return fail('Wrong username or password.');
+   await enter(data.user);return;
+  }
+  if(b.id==='su'){
+   const username=$('#nu').value.trim().toLowerCase(),password=$('#np').value,answer=$('#na').value.trim(),question=$('#nq').value;
+   if(!/^[a-z0-9_]{3,20}$/.test(username))return fail('Username needs 3-20 letters, digits or underscores.');
+   if(password.length<6)return fail('Password needs at least 6 characters.');
+   if(password!==$('#nc').value)return fail('The passwords do not match.');
+   if(!answer)return fail('Enter a recovery answer.');
+   const {data,error}=await supabaseClient.auth.signUp({email:usernameEmail(username),password,options:{data:{username,name:'',role:'Owner',photo:''}}});
+   if(error)return fail(error.message);
+   if(!data.user||!data.session)return fail('Account created, but sign-in is pending. In Supabase, turn off email confirmation for username-only accounts, then try signing in.');
+   try{await writeRecovery(data.user.id,username,question,answer);activeUserId=data.user.id;await saveInitialInventory(data.user.id)}
+   catch(error){await supabaseClient.auth.signOut();activeUserId='';return fail('Account created, but setup failed: '+error.message+' Check the setup SQL and try signing in again.')}
+   await enter(data.user);return;
+  }
+ }catch(error){fail(error.message||'The request could not be completed. Check your connection and Supabase setup.')}
 });
 $('#card').addEventListener('keydown',e=>{if(e.key==='Enter'){const c=$('#card'),button=c.classList.contains('auth-card')?(c.classList.contains('register-active')?$('#su'):$('#go')):c.querySelector('.primary');if(button)button.click()}});
 function appDisplayMode(){return matchMedia('(max-width:760px)').matches?'block':'grid'}
 window.addEventListener('resize',()=>{if(document.body.classList.contains('in')&&$('#app').style.display!=='none')$('#app').style.display=appDisplayMode()});
-function enter(username,profile){activeUser=username;activeProfile=profile;paintProfile(profile,username);db=load();if(!save())toast('Inventory is available for this session, but browser storage is unavailable.',true);$('#card').classList.add('unlock');document.body.classList.add('in');setTimeout(()=>{$('#login').style.display='none';$('#app').style.display=appDisplayMode();render()},650)}
+async function enter(user){
+ if(!user||!user.id)throw new Error('Supabase did not return a signed-in account.');
+ activeUserId=user.id;
+ const metadata=user.user_metadata||{};
+ activeUser=String(metadata.username||'').trim().toLowerCase();
+ if(!activeUser)throw new Error('This account has no username. Contact the site administrator.');
+ activeProfile={name:metadata.name||'',role:metadata.role||'Owner',photo:metadata.photo||''};
+ db=await loadInventory(activeUserId);
+ paintProfile(activeProfile,activeUser);
+ $('#card').classList.add('unlock');document.body.classList.add('in');
+ setTimeout(()=>{$('#login').style.display='none';$('#app').style.display=appDisplayMode();render()},650);
+}
+async function restoreSession(){
+ if(!supabaseClient){fail('Supabase is not configured. Add the project URL and publishable key to supabase-config.js.');return}
+ const {data,error}=await supabaseClient.auth.getSession();
+ if(error)throw error;
+ if(data.session)await enter(data.session.user);
+}
 function avatar(el,profile,fallback){el.textContent='';const photo=profile&&typeof profile.photo==='string'&&profile.photo.indexOf('data:image/jpeg;base64,')===0?profile.photo:'';if(photo){const image=document.createElement('img');image.src=photo;image.alt='';el.appendChild(image);return}const name=(profile&&typeof profile.name==='string'?profile.name:fallback||'?').trim();el.textContent=name.split(/\s+/).slice(0,2).map(part=>part.charAt(0)).join('').toUpperCase()||'?'}
 function paintProfile(profile,fallback){avatar($('#profileAvatar'),profile,fallback);$('#profileButtonName').textContent=profile&&typeof profile.name==='string'&&profile.name.trim()?profile.name.trim():'Create profile'}
 let pendingProfilePhoto='';
 function compressPhoto(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onerror=()=>reject(new Error('Could not read that image.'));reader.onload=()=>{const image=new Image();image.onerror=()=>reject(new Error('That image could not be opened.'));image.onload=()=>{const scale=Math.min(1,256/Math.max(image.naturalWidth,image.naturalHeight)),canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(image.naturalWidth*scale));canvas.height=Math.max(1,Math.round(image.naturalHeight*scale));const context=canvas.getContext('2d');if(!context){reject(new Error('Image processing is unavailable.'));return}context.drawImage(image,0,0,canvas.width,canvas.height);resolve(canvas.toDataURL('image/jpeg',.82))};image.src=reader.result};reader.readAsDataURL(file)})}
-async function openProfile(){const profile=activeProfile,accounts=await users(),account=accounts[activeUser]||{};$('#ownerName').value=profile.name||'';$('#ownerRole').value=profile.role||'Owner';$('#ownerQuestion').innerHTML='<option value="">No recovery question</option>'+QS.map(q=>'<option>'+esc(q)+'</option>').join('');$('#ownerQuestion').value=account.q||'';$('#ownerAnswer').value='';pendingProfilePhoto=profile.photo||'';avatar($('#profilePreview'),profile,activeUser);$('#profilePhoto').value='';$('#profileError').textContent='';$('#profileDialog').showModal()}
-$('#editProfile').onclick=()=>{$('#profileMenu').open=false;openProfile()};
+async function openProfile(){
+ const {data:recovery,error}=await supabaseClient.from('account_recovery').select('question').eq('user_id',activeUserId).maybeSingle();
+ if(error)throw error;
+ const profile=activeProfile;
+ $('#ownerName').value=profile.name||'';
+ $('#ownerRole').value=profile.role||'Owner';
+ $('#ownerQuestion').innerHTML='<option value="">No recovery question</option>'+QS.map(q=>'<option>'+esc(q)+'</option>').join('');
+ $('#ownerQuestion').value=recovery&&recovery.question||'';
+ $('#ownerAnswer').value='';
+ pendingProfilePhoto=profile.photo||'';
+ avatar($('#profilePreview'),profile,activeUser);
+ $('#profilePhoto').value='';
+ $('#profileError').textContent='';
+ $('#profileDialog').showModal();
+}
+$('#editProfile').onclick=()=>{$('#profileMenu').open=false;openProfile().catch(error=>toast('Could not load profile: '+error.message,true))};
 $('#aboutProfile').onclick=()=>{$('#profileMenu').open=false;tab='about';render()};
 $('#cancelProfile').onclick=()=>$('#profileDialog').close();
 $('#profilePhoto').onchange=async e=>{const file=e.target.files[0];if(!file)return;const error=$('#profileError');if(!['image/jpeg','image/png','image/webp'].includes(file.type)){error.textContent='Choose a JPG, PNG, or WebP image.';e.target.value='';return}if(file.size>5*1024*1024){error.textContent='Choose an image smaller than 5 MB.';e.target.value='';return}try{pendingProfilePhoto=await compressPhoto(file);avatar($('#profilePreview'),{name:$('#ownerName').value,photo:pendingProfilePhoto},activeUser);error.textContent=''}catch(err){error.textContent=err.message;e.target.value=''}};
 $('#removeProfilePhoto').onclick=()=>{pendingProfilePhoto='';$('#profilePhoto').value='';avatar($('#profilePreview'),{name:$('#ownerName').value},activeUser)};
 $('#ownerName').oninput=()=>{if(!pendingProfilePhoto)avatar($('#profilePreview'),{name:$('#ownerName').value},activeUser)};
-$('#profileForm').onsubmit=async e=>{e.preventDefault();const name=$('#ownerName').value.trim();if(!name){$('#profileError').textContent='Enter the owner name.';return}const accounts=await users();if(!accounts[activeUser]){$('#profileError').textContent='Account not found. Sign in again to update the profile.';return}const profile={name,role:$('#ownerRole').value.trim()||'Owner',photo:pendingProfilePhoto},account=accounts[activeUser],question=$('#ownerQuestion').value,answer=$('#ownerAnswer').value.trim();if(question&&answer){account.q=question;account.a=await hash(answer.toLowerCase())}else if(question&&question!==account.q){$('#profileError').textContent='Enter an answer for the new recovery question.';return}else if(!question){delete account.q;delete account.a}account.profile=profile;if(!await saveUsers(accounts)){$('#profileError').textContent='Browser storage is unavailable; profile changes could not be saved.';return}activeProfile=profile;paintProfile(profile,activeUser);$('#profileDialog').close();toast('Profile saved.')};
-$('#out').onclick=()=>{activeUser='';activeProfile={};recoveryUser='';recoveryQuestion='';db=null;$('#profileMenu').open=false;document.body.classList.remove('in');$('#app').style.display='none';$('#login').style.display='grid';card('in')};
-let savedTheme='dark';try{savedTheme=localStorage.getItem(THEME_KEY)||'dark'}catch(e){}setTheme(savedTheme,false);document.querySelectorAll('.theme-toggle').forEach(button=>button.onclick=()=>setTheme(document.body.classList.contains('light')?'dark':'light',true));card('in');
+$('#profileForm').onsubmit=async e=>{
+ e.preventDefault();
+ const name=$('#ownerName').value.trim(),question=$('#ownerQuestion').value,answer=$('#ownerAnswer').value.trim();
+ if(!name){$('#profileError').textContent='Enter the owner name.';return}
+ const {data:existingRecovery,error:readError}=await supabaseClient.from('account_recovery').select('question').eq('user_id',activeUserId).maybeSingle();
+ if(readError){$('#profileError').textContent='Could not load recovery settings: '+readError.message;return}
+ if(question&&!answer&&(!existingRecovery||existingRecovery.question!==question)){$('#profileError').textContent='Enter an answer for the new recovery question.';return}
+ const profile={name,role:$('#ownerRole').value.trim()||'Owner',photo:pendingProfilePhoto};
+ const {error:profileError}=await supabaseClient.auth.updateUser({data:{username:activeUser,name:profile.name,role:profile.role,photo:profile.photo}});
+ if(profileError){$('#profileError').textContent='Could not save profile: '+profileError.message;return}
+ try{
+  if(question&&answer)await writeRecovery(activeUserId,activeUser,question,answer);
+  else if(!question&&existingRecovery){const {error}=await supabaseClient.from('account_recovery').delete().eq('user_id',activeUserId);if(error)throw error}
+ }catch(error){$('#profileError').textContent='Profile saved, but recovery settings were not saved: '+error.message;return}
+ activeProfile=profile;paintProfile(profile,activeUser);$('#profileDialog').close();toast('Profile saved.')
+};
+$('#out').onclick=async()=>{
+ const {error}=await supabaseClient.auth.signOut();
+ if(error){toast('Could not sign out: '+error.message,true);return}
+ activeUser='';activeUserId='';activeProfile={};recoveryUser='';recoveryQuestion='';db=null;
+ $('#profileMenu').open=false;document.body.classList.remove('in');$('#app').style.display='none';$('#login').style.display='grid';card('in');
+};
+let savedTheme='dark';try{savedTheme=localStorage.getItem(THEME_KEY)||'dark'}catch(e){}setTheme(savedTheme,false);document.querySelectorAll('.theme-toggle').forEach(button=>button.onclick=()=>setTheme(document.body.classList.contains('light')?'dark':'light',true));card('in');restoreSession().catch(error=>fail('Could not restore Supabase session: '+error.message));

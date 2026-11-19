@@ -47,7 +47,7 @@
 <dialog id="profileDialog" aria-labelledby="profileTitle">
  <form id="profileForm">
   <h2 id="profileTitle">Owner profile</h2>
-  <p class="profile-help">Your profile is saved in this browser.</p>
+  <p class="profile-help">Your profile and recovery settings are saved with your Supabase account.</p>
   <div class="profile-preview" id="profilePreview" aria-label="Profile photo preview"></div>
   <label for="profilePhoto">Profile photo</label><input id="profilePhoto" type="file" accept="image/jpeg,image/png,image/webp">
   <button type="button" class="ghost remove-photo" id="removeProfilePhoto">Remove photo</button>
@@ -60,6 +60,8 @@
  </form>
 </dialog><div id="toast" role="status"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="supabase-config.js"></script>
 <script src="app.js" defer></script>
 </body>
 </html>
