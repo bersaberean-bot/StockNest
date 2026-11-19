@@ -45,22 +45,47 @@ $('#nav').onclick=e=>{const b=e.target.closest('button');if(b){tab=b.dataset.t;r
 function render(){nav();const v=$('#view');({products:vProducts,move:vMove,low:vLow,reorder:vReorder,history:vHistory,proof:vProof,about:vAbout})[tab](v)}
 
 function vProducts(v){
- const e=db.products.find(p=>p.sku===editSku)||{sku:'',name:'',qty:0,threshold:5,target:20};
  const list=db.products.filter(p=>(p.sku+' '+p.name).toLowerCase().includes(q.toLowerCase()));
- v.innerHTML='<div class="panel"><h3>'+(editSku?'Edit '+esc(editSku):'Add a product')+'</h3><div class="row2">'+
- '<div><label>SKU</label><input id="fs" value="'+esc(e.sku)+'" '+(editSku?'readonly':'')+'></div>'+
- '<div style="flex:2"><label>Name</label><input id="fn" value="'+esc(e.name)+'"></div>'+
- (editSku?'':'<div><label>Opening stock</label><input id="fq" type="number" min="0" value="'+e.qty+'"></div>')+
- '<div><label>Minimum threshold</label><input id="ft" type="number" min="0" value="'+e.threshold+'"></div>'+
- '<div><label>Target stock</label><input id="fg" type="number" min="1" value="'+e.target+'"></div></div>'+
- '<div class="err" id="perr"></div><button id="sp">'+(editSku?'Save changes':'Add product')+'</button> '+(editSku?'<button class="ghost" id="cp">Cancel</button>':'')+'</div>'+
+ v.innerHTML='<div class="panel"><h3>Add a product</h3><div class="row2">'+
+ '<div><label>SKU</label><input id="fs" value=""></div>'+
+ '<div style="flex:2"><label>Name</label><input id="fn" value=""></div>'+
+ '<div><label>Opening stock</label><input id="fq" type="number" min="0" value="0"></div>'+
+ '<div><label>Minimum threshold</label><input id="ft" type="number" min="0" value="5"></div>'+
+ '<div><label>Target stock</label><input id="fg" type="number" min="1" value="20"></div></div>'+
+ '<div class="err" id="perr"></div><button id="sp" type="button">Add product</button></div>'+
  '<div class="panel"><div class="row2"><h3 style="flex:2;margin:0">Products ('+list.length+')</h3><input id="sq" placeholder="Search by SKU or name" value="'+esc(q)+'"></div><div class="tw"><table><tr><th>SKU</th><th>Name</th><th class="n">Stock</th><th class="n">Threshold</th><th class="n">Target</th><th></th></tr>'+
- list.map(p=>'<tr class="'+(p.qty<=p.threshold?'low':'')+'"><td>'+esc(p.sku)+'</td><td>'+esc(p.name)+'</td><td class="n">'+p.qty+'</td><td class="n">'+p.threshold+'</td><td class="n">'+p.target+'</td><td><button class="ghost" data-e="'+esc(p.sku)+'">Edit</button></td></tr>').join('')+'</table></div></div>';
- $('#sp').onclick=async()=>{const before=JSON.parse(JSON.stringify(db));const r=editSku?editProduct(db,editSku,$('#fn').value,num('#ft'),num('#fg')):addProduct(db,{sku:$('#fs').value.trim(),name:$('#fn').value,qty:num('#fq'),threshold:num('#ft'),target:num('#fg')});
+ list.map(p=>'<tr class="'+(p.qty<=p.threshold?'low':'')+'"><td>'+esc(p.sku)+'</td><td>'+esc(p.name)+'</td><td class="n">'+p.qty+'</td><td class="n">'+p.threshold+'</td><td class="n">'+p.target+'</td><td><button type="button" class="ghost" data-e="'+esc(p.sku)+'">Edit</button></td></tr>').join('')+'</table></div></div>';
+ $('#sp').onclick=async()=>{const before=JSON.parse(JSON.stringify(db));const r=addProduct(db,{sku:$('#fs').value.trim(),name:$('#fn').value,qty:num('#fq'),threshold:num('#ft'),target:num('#fg')});
   if(!r.ok){$('#perr').textContent=r.msg;toast(r.msg,1);return}try{await save()}catch(error){db=before;const message='Could not save product: '+error.message;$('#perr').textContent=message;toast(message,true);render();return}editSku=null;toast(r.msg);render()};
- if($('#cp'))$('#cp').onclick=()=>{editSku=null;render()};
  $('#sq').oninput=e=>{q=e.target.value;const pos=e.target.selectionStart;vProducts(v);const s=$('#sq');s.focus();s.setSelectionRange(pos,pos)};
- v.querySelectorAll('[data-e]').forEach(b=>b.onclick=()=>{editSku=b.dataset.e;render();scrollTo({top:0,behavior:'smooth'})})}
+ v.querySelectorAll('[data-e]').forEach(b=>b.onclick=()=>openProductEdit(b.dataset.e))}
+
+function openProductEdit(sku){
+ const product=db.products.find(item=>item.sku===sku);
+ if(!product)return;
+ editSku=sku;
+ $('#productEditTitle').textContent='Edit product';
+ $('#editProductSku').value=product.sku;
+ $('#editProductName').value=product.name;
+ $('#editProductThreshold').value=product.threshold;
+ $('#editProductTarget').value=product.target;
+ $('#productEditError').textContent='';
+ $('#productEditDialog').showModal();
+ $('#editProductName').focus();
+}
+
+$('#cancelProductEdit').onclick=()=>$('#productEditDialog').close();
+$('#productEditDialog').addEventListener('close',()=>{editSku=null});
+$('#saveProductEdit').onclick=async()=>{
+ const before=JSON.parse(JSON.stringify(db));
+ const result=editProduct(db,editSku,$('#editProductName').value,num('#editProductThreshold'),num('#editProductTarget'));
+ if(!result.ok){$('#productEditError').textContent=result.msg;return}
+ try{await save()}catch(error){db=before;const message='Could not save product: '+error.message;$('#productEditError').textContent=message;toast(message,true);return}
+ $('#productEditDialog').close();
+ editSku=null;
+ toast(result.msg);
+ render();
+};
 
 function vMove(v){
  v.innerHTML='<div class="panel"><h3>Record stock-in or stock-out</h3><div class="row2"><div style="flex:2"><label>Product</label><select id="ms">'+skuOpts()+'</select></div>'+

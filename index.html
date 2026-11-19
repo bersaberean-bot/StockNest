@@ -32,6 +32,18 @@
   <section id="view"></section>
  </main>
 </div>
+<dialog id="productEditDialog" class="product-edit-dialog" aria-labelledby="productEditTitle">
+ <h2 id="productEditTitle">Edit product</h2>
+ <p>Update the product name and stock limits.</p>
+ <label for="editProductSku">SKU</label><input id="editProductSku" readonly>
+ <label for="editProductName">Name</label><input id="editProductName" maxlength="100">
+ <div class="row2">
+  <div><label for="editProductThreshold">Minimum threshold</label><input id="editProductThreshold" type="number" min="0" step="1"></div>
+  <div><label for="editProductTarget">Target stock</label><input id="editProductTarget" type="number" min="1" step="1"></div>
+ </div>
+ <div class="err" id="productEditError" role="alert"></div>
+ <div class="product-edit-actions"><button type="button" class="ghost" id="cancelProductEdit">Cancel</button><button type="button" class="primary" id="saveProductEdit">Save changes</button></div>
+</dialog>
 <dialog id="profileDialog" aria-labelledby="profileTitle">
  <form id="profileForm">
   <h2 id="profileTitle">Owner profile</h2>
